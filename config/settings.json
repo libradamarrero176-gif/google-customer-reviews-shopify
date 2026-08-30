@@ -1,0 +1,43 @@
+{
+  "merchant_id": 5838265930,
+  "debug_mode": false,
+  "validation": {
+    "require_gtin": false,
+    "require_delivery_date": true,
+    "timeout_ms": 5000
+  },
+  "fields": {
+    "order_id": {
+      "source": "order.name",
+      "required": true,
+      "validation": "non-empty"
+    },
+    "email": {
+      "source": "order.email",
+      "required": true,
+      "validation": "email-format"
+    },
+    "delivery_country": {
+      "source": "order.shipping_address.country_code",
+      "required": true,
+      "validation": "iso-2-letter-code",
+      "default": "US"
+    },
+    "estimated_delivery_date": {
+      "source": "order.fulfillments[0].estimated_delivery_at",
+      "required": true,
+      "validation": "yyyy-mm-dd-format"
+    },
+    "products": {
+      "source": "order.line_items[].barcode",
+      "required": false,
+      "validation": "gtin-format"
+    }
+  },
+  "error_handling": {
+    "log_to_console": true,
+    "fallback_country": "US",
+    "retry_attempts": 3,
+    "retry_delay_ms": 1000
+  }
+}

@@ -1,0 +1,238 @@
+{% comment %}
+  Google Customer Reviews - Custom Section
+  
+  Integración de Google Customer Reviews con:
+  - Validación de datos completa
+  - Manejo robusto de errores
+  - Soporte para múltiples productos
+  - Logs de depuración
+  
+  Uso: Agrega esta sección a tu página de confirmación de orden
+{% endcomment %}
+
+{% if order %}
+  <script src="https://apis.google.com/js/platform.js?onload=renderGCROptIn" async defer></script>
+  
+  <script>
+    // Google Customer Reviews - Integración Segura
+    (function() {
+      'use strict';
+      
+      // Configuración
+      const GCR_CONFIG = {
+        merchantId: {{ section.settings.merchant_id }},
+        debug: {{ section.settings.debug_mode }}
+      };
+      
+      // Utilidades de validación
+      const Validators = {
+        // Valida que no esté vacío
+        required: function(value, fieldName) {
+          if (!value || value.trim() === '') {
+            this.logError(`Campo requerido vacío: ${fieldName}`);
+            return false;
+          }
+          return true;
+        },
+        
+        // Valida formato de email
+        email: function(email) {
+          const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+          if (!emailRegex.test(email)) {
+            this.logError(`Email inválido: ${email}`);
+            return false;
+          }
+          return true;
+        },
+        
+        // Valida código de país (ISO 2 letras)
+        country: function(countryCode) {
+          if (!countryCode || countryCode.length !== 2) {
+            this.logError(`Código de país inválido: ${countryCode}`);
+            return false;
+          }
+          return true;
+        },
+        
+        // Valida formato de fecha YYYY-MM-DD
+        date: function(dateString) {
+          const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+          if (!dateRegex.test(dateString)) {
+            this.logError(`Formato de fecha inválido: ${dateString}. Use YYYY-MM-DD`);
+            return false;
+          }
+          return true;
+        },
+        
+        // Valida GTIN (debe ser numérico, 8-14 dígitos)
+        gtin: function(gtin) {
+          const gtinRegex = /^[0-9]{8,14}$/;
+          if (gtin && !gtinRegex.test(gtin)) {
+            this.logError(`GTIN inválido: ${gtin}. Debe ser numérico, 8-14 dígitos`);
+            return false;
+          }
+          return true;
+        },
+        
+        // Log de errores
+        logError: function(message) {
+          if (GCR_CONFIG.debug) {
+            console.error('[GCR Error]', message);
+          }
+        }
+      };
+      
+      // Extraer y validar datos de la orden
+      function extractOrderData() {
+        try {
+          // Obtener datos básicos
+          const orderId = '{{ order.name }}';
+          const email = '{{ order.email }}';
+          const countryCode = '{{ order.shipping_address.country_code }}';
+          const deliveryDate = '{{ order.fulfillments[0].estimated_delivery_at | date: "%Y-%m-%d" }}';
+          
+          // Validar datos requeridos
+          if (!Validators.required(orderId, 'order.name')) return null;
+          if (!Validators.required(email, 'order.email')) return null;
+          if (!Validators.email(email)) return null;
+          if (!Validators.required(countryCode, 'order.shipping_address.country_code')) return null;
+          if (!Validators.country(countryCode)) return null;
+          if (!Validators.required(deliveryDate, 'order.fulfillments[0].estimated_delivery_at')) return null;
+          if (!Validators.date(deliveryDate)) return null;
+          
+          // Extraer productos
+          const products = [];
+          {% for line_item in order.line_items %}
+            {%- if line_item.barcode -%}
+              const gtin = '{{ line_item.barcode }}';
+              if (Validators.gtin(gtin)) {
+                products.push({ gtin: gtin });
+              }
+            {%- endif -%}
+          {% endfor %}
+          
+          if (GCR_CONFIG.debug) {
+            console.log('[GCR] Datos de orden extraídos:', {
+              orderId: orderId,
+              email: email,
+              countryCode: countryCode,
+              deliveryDate: deliveryDate,
+              productsCount: products.length
+            });
+          }
+          
+          return {
+            orderId: orderId,
+            email: email,
+            countryCode: countryCode,
+            deliveryDate: deliveryDate,
+            products: products
+          };
+          
+        } catch (error) {
+          console.error('[GCR] Error extrayendo datos:', error);
+          return null;
+        }
+      }
+      
+      // Renderizar widget
+      window.renderGCROptIn = function() {
+        try {
+          // Validar Merchant ID
+          if (!GCR_CONFIG.merchantId) {
+            console.error('[GCR] Merchant ID no configurado');
+            return;
+          }
+          
+          // Extraer datos
+          const orderData = extractOrderData();
+          if (!orderData) {
+            console.error('[GCR] No se pudieron extraer datos válidos de la orden');
+            return;
+          }
+          
+          // Cargar Google API
+          window.gapi.load('surveyoptin', function() {
+            try {
+              // Construir payload
+              const payload = {
+                merchant_id: GCR_CONFIG.merchantId,
+                order_id: orderData.orderId,
+                email: orderData.email,
+                delivery_country: orderData.countryCode,
+                estimated_delivery_date: orderData.deliveryDate
+              };
+              
+              // Agregar productos si existen
+              if (orderData.products.length > 0) {
+                payload.products = orderData.products;
+              }
+              
+              if (GCR_CONFIG.debug) {
+                console.log('[GCR] Renderizando con payload:', payload);
+              }
+              
+              // Renderizar
+              window.gapi.surveyoptin.render(payload);
+              
+              if (GCR_CONFIG.debug) {
+                console.log('[GCR] Survey renderizado exitosamente');
+              }
+              
+            } catch (error) {
+              console.error('[GCR] Error al renderizar:', error);
+            }
+          });
+          
+        } catch (error) {
+          console.error('[GCR] Error fatal:', error);
+        }
+      };
+      
+      // Inicializar cuando DOM esté listo
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function() {
+          if (GCR_CONFIG.debug) {
+            console.log('[GCR] Inicializando Google Customer Reviews');
+          }
+        });
+      }
+      
+    })();
+  </script>
+{% endif %}
+
+{% schema %}
+{
+  "name": "Google Customer Reviews",
+  "settings": [
+    {
+      "type": "number",
+      "id": "merchant_id",
+      "label": "Merchant ID",
+      "description": "Tu Merchant ID de Google Customer Reviews",
+      "default": 5838265930,
+      "placeholder": "5838265930"
+    },
+    {
+      "type": "checkbox",
+      "id": "debug_mode",
+      "label": "Modo Depuración",
+      "description": "Habilita logs en la consola del navegador",
+      "default": false
+    }
+  ],
+  "presets": [
+    {
+      "name": "Google Customer Reviews"
+    }
+  ]
+}
+{% endschema %}
+
+<style>
+  /* Estilos opcionales para el contenedor */
+  .shopify-section[data-section-type="google-customer-reviews"] {
+    display: none;
+  }
+</style>
